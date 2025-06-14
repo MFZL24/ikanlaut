@@ -1,28 +1,24 @@
 from flask import Flask, request, render_template, jsonify
 import numpy as np
 import cv2
-from skimage.feature import local_binary_pattern
-import joblib
 from PIL import Image
 import io
+import joblib
+from skimage.feature import local_binary_pattern
 
 app = Flask(__name__)
 
-# Load model
+# Load model dan label encoder
 model = joblib.load("logistic_regression_model.joblib")
+label_encoder = joblib.load("label_encoder.pkl")
 
-# Label asli (tanpa LabelEncoder)
-categories = ["ikan_bandeng", "ikan_tongkol", "ikan_kerisi", "ikan_selar"]
-
-# Ekstraksi HSV Histogram (Range channel sesuai OpenCV)
-def extract_color_histogram_hsv(image, bins=(8, 8, 8)):
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    hist = cv2.calcHist([hsv], [0, 1, 2], None, bins,
-                        [0, 180, 0, 256, 0, 256])  # ✅ Range benar
+# Fungsi ekstraksi fitur sesuai model (522 fitur)
+def extract_color_histogram(image, bins=(8, 8, 8)):
+    hist = cv2.calcHist([image], [0, 1, 2], None, bins,
+                        [0, 256, 0, 256, 0, 256])
     hist = cv2.normalize(hist, hist).flatten()
     return hist
 
-# Ekstraksi LBP
 def extract_lbp_features(image, P=8, R=1):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     lbp = local_binary_pattern(gray, P, R, method='uniform')
@@ -32,38 +28,43 @@ def extract_lbp_features(image, P=8, R=1):
     hist /= (hist.sum() + 1e-7)
     return hist
 
-# Ekstraksi Kombinasi
-def extract_features(image):
-    image = cv2.resize(image, (128, 128))  # ✅ Ukuran sesuai training
-    hist_color = extract_color_histogram_hsv(image)
-    hist_lbp = extract_lbp_features(image)
-    combined = np.concatenate([hist_color, hist_lbp])
-    return combined.reshape(1, -1)
+@app.route('/')
+def home():
+    return render_template('index.html')
 
-@app.route("/")
-def index():
-    return render_template("index.html")
-
-@app.route("/predict", methods=["POST"])
+@app.route('/predict', methods=['POST'])
 def predict():
-    if "file" not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image uploaded'}), 400
 
-    file = request.files["file"]
-    if file.filename == "":
-        return jsonify({"error": "No selected file"}), 400
+    file = request.files['image']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
 
     try:
-        image = Image.open(io.BytesIO(file.read())).convert("RGB")
-        image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+        # Baca dan preproses gambar
+        image = Image.open(io.BytesIO(file.read())).convert('RGB')
+        image = np.array(image)
+        image = cv2.resize(image, (128, 128))
+
+        # Ekstraksi fitur
+        color_hist = extract_color_histogram(image)  # 512
+        lbp_hist = extract_lbp_features(image)       # 10
+        combined = np.concatenate([color_hist, lbp_hist])  # 522 fitur
+
+        # Tambah 13 nilai nol agar jumlah fitur 535 (sementara)
+        if combined.shape[0] < 535:
+            padding = np.zeros(535 - combined.shape[0])
+            combined = np.concatenate([combined, padding])
+
+        # Prediksi
+        prediction_encoded = model.predict([combined])[0]
+        prediction_label = label_encoder.inverse_transform([prediction_encoded])[0]
+
+        return jsonify({'prediction': prediction_label})
+
     except Exception as e:
-        return jsonify({"error": f"Gagal membaca gambar: {str(e)}"}), 400
+        return jsonify({'error': str(e)}), 500
 
-    features = extract_features(image)
-    prediction = model.predict(features)
-    predicted_label = prediction[0]
-
-    return jsonify({"prediction": predicted_label})
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     app.run(debug=True)

@@ -83,107 +83,91 @@
   document.addEventListener("DOMContentLoaded", function () {
     const dropArea = document.getElementById("dropArea");
     const fileInput = document.getElementById("fileInput");
-    const predictButton = document.getElementById("predictButton");
-    const previewImage = document.getElementById("previewImage");
     const previewBox = document.getElementById("previewBox");
-    const classificationText = document.getElementById("classificationText");
+    const previewImage = document.getElementById("previewImage");
     const classificationResult = document.getElementById(
       "classificationResult"
     );
-    const loadingBar = document.getElementById("loading");
-    const progressBar = document.getElementById("progressBar");
+    const classificationText = document.getElementById("classificationText");
+    const predictButton = document.getElementById("predictButton");
+    const loading = document.getElementById("loading");
 
-    // Drag & Drop Event
-    dropArea.addEventListener("dragover", (event) => {
-      event.preventDefault();
-      dropArea.classList.add("active");
+    // Drag & Drop
+    dropArea.addEventListener("click", () => fileInput.click());
+
+    dropArea.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      dropArea.classList.add("bg-light");
     });
 
     dropArea.addEventListener("dragleave", () => {
-      dropArea.classList.remove("active");
+      dropArea.classList.remove("bg-light");
     });
 
-    dropArea.addEventListener("drop", (event) => {
-      event.preventDefault();
-      dropArea.classList.remove("active");
-
-      if (event.dataTransfer.files.length > 0) {
-        fileInput.files = event.dataTransfer.files;
-        previewImageFile(fileInput.files[0]);
-      }
+    dropArea.addEventListener("drop", (e) => {
+      e.preventDefault();
+      dropArea.classList.remove("bg-light");
+      const file = e.dataTransfer.files[0];
+      fileInput.files = e.dataTransfer.files;
+      previewImageFile(file);
     });
 
-    // Klik untuk pilih file
-    dropArea.addEventListener("click", () => {
-      fileInput.click();
+    fileInput.addEventListener("change", function () {
+      const file = fileInput.files[0];
+      previewImageFile(file);
     });
 
-    fileInput.addEventListener("change", (event) => {
-      if (event.target.files.length > 0) {
-        previewImageFile(event.target.files[0]);
-      }
-    });
-
-    // Preview Gambar
     function previewImageFile(file) {
-      const reader = new FileReader();
-      reader.onload = function (e) {
-        previewImage.src = e.target.result;
-        previewBox.classList.remove("d-none"); // Menampilkan preview gambar
-      };
-      reader.readAsDataURL(file);
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = function (e) {
+          previewImage.src = e.target.result;
+          previewBox.classList.remove("d-none");
+        };
+        reader.readAsDataURL(file);
+      }
     }
 
-    // Prediksi Gambar
-    predictButton.addEventListener("click", async () => {
-      const file = fileInput.files[0];
-      if (!file) {
-        alert("Silakan unggah gambar terlebih dahulu.");
-        return;
-      }
+    document
+      .getElementById("uploadForm")
+      .addEventListener("submit", function (e) {
+        e.preventDefault();
 
-      const formData = new FormData();
-      formData.append("file", file);
-
-      // Tampilkan loading bar
-      classificationText.textContent = "Memproses...";
-      classificationResult.classList.remove("d-none");
-      loadingBar.classList.remove("d-none");
-
-      // Simulasi progres
-      let progress = 0;
-      const interval = setInterval(() => {
-        progress += 10;
-        progressBar.style.width = progress + "%";
-        if (progress >= 100) {
-          clearInterval(interval);
+        const file = fileInput.files[0];
+        if (!file) {
+          alert("Silakan pilih gambar terlebih dahulu.");
+          return;
         }
-      }, 200);
 
-      try {
-        const response = await fetch("/predict", {
+        loading.classList.remove("d-none");
+        classificationResult.classList.add("d-none");
+
+        const formData = new FormData();
+        formData.append("image", file);
+
+        fetch("/predict", {
           method: "POST",
           body: formData,
-        });
-        const data = await response.json();
+        })
+          .then((res) => res.json())
+          .then((data) => {
+            loading.classList.add("d-none");
+            classificationResult.classList.remove("d-none");
 
-        if (response.ok) {
-          classificationText.textContent = `Hasil: ${data.prediction}`;
-          classificationText.classList.add("text-success");
-        } else {
-          classificationText.textContent = `Error: ${data.error}`;
-          classificationText.classList.add("text-danger");
-        }
-      } catch (error) {
-        classificationText.textContent = "Terjadi kesalahan saat memproses.";
-        classificationText.classList.add("text-danger");
-      }
-
-      // Sembunyikan loading bar
-      setTimeout(() => {
-        loadingBar.classList.add("d-none");
-        progressBar.style.width = "0%";
-      }, 1000);
-    });
+            if (data.prediction) {
+              classificationText.innerText = `✅ ${data.prediction}`;
+            } else if (data.error) {
+              classificationText.innerText = `❌ Gagal memproses gambar: ${data.error}`;
+            } else {
+              classificationText.innerText = "❌ Gagal memproses gambar.";
+            }
+          })
+          .catch((err) => {
+            loading.classList.add("d-none");
+            classificationResult.classList.remove("d-none");
+            classificationText.innerText = "❌ Terjadi kesalahan server.";
+            console.error("Error:", err);
+          });
+      });
   });
 })();
